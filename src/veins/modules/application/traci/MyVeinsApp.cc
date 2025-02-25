@@ -117,8 +117,6 @@ void MyVeinsApp::onWSM(BaseFrame1609_4* wsm) {
                 bestCoord = cartesianCandidate;
             }
         }
-
-        // 输出最终结果
         std::cout << " distance: " << minDistance << std::endl;
         return;
     }
