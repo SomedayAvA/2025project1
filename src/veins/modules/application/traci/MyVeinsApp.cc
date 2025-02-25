@@ -65,10 +65,9 @@ void MyVeinsApp::onBSM(DemoSafetyMessage* bsm)
 
 // Handle WSM (Wave Short Message) reception.
 // Processes both encrypted coordinate messages and replies.
-void MyVeinsApp::onWSM(BaseFrame1609_4* frame) {
+void MyVeinsApp::onWSM(BaseFrame1609_4* wsm) {
     // Initialize the encryption environment.
 
-    /*std::cout <<  "22222" << std::endl;
     // Cast the incoming message to our message type.
     TraCIDemo11pMessage* receivedWSM = check_and_cast<TraCIDemo11pMessage*>(wsm);
     std::string receivedData = receivedWSM->getDemoData();
@@ -95,10 +94,32 @@ void MyVeinsApp::onWSM(BaseFrame1609_4* frame) {
         long double d1 = diff1.get_d();
         long double d2 = diff2.get_d();
         long double distance = std::sqrt(d1 * d1 + d2 * d2);
+        Coord currentPos = mobility->getPositionAt(simTime());
+        FrenetCoord originalFrenet = getFrenetCoordinates(currentPos);
+        const std::array<std::pair<double, double>, 4> candidates = {{
+            {originalFrenet.s + d1, originalFrenet.d + d2}, // s+d1, d+d2
+            {originalFrenet.s + d1, originalFrenet.d - d2}, // s+d1, d-d2
+            {originalFrenet.s - d1, originalFrenet.d + d2}, // s-d1, d+d2
+            {originalFrenet.s - d1, originalFrenet.d - d2}  // s-d1, d-d2
+        }};
+        double minDistance = std::numeric_limits<double>::max();
+        Coord bestCoord;
+        for (const auto& candidate : candidates) {
+            double s_candidate = candidate.first;
+            double d_candidate = candidate.second;
+            Coord cartesianCandidate = getCartesianFromFrenet(s_candidate, d_candidate);
 
-        std::cout << "Receiver Vehicle[" << myId << "] received decrypted differences from Vehicle["
-                  << receivedWSM->getSenderAddress() << "]: ("
-                  << diff1 << ", " << diff2 << "), Euclidean distance = " << distance << std::endl;
+            double dx = cartesianCandidate.x - currentPos.x;
+            double dy = cartesianCandidate.y - currentPos.y;
+            double distance = std::hypot(dx, dy);
+            if (distance < minDistance) {
+                minDistance = distance;
+                bestCoord = cartesianCandidate;
+            }
+        }
+
+        // 输出最终结果
+        std::cout << " distance: " << minDistance << std::endl;
         return;
     }
 
@@ -155,18 +176,11 @@ void MyVeinsApp::onWSM(BaseFrame1609_4* frame) {
     TraCIDemo11pMessage* replyMsg = new TraCIDemo11pMessage();
     populateWSM(replyMsg);
     replyMsg->setDemoData(replyStr.c_str());
+    replyMsg->setSenderAddress(myId);
     replyMsg->setSerial(1);  // Mark the message as a reply.
     std::cout << "Receiver Vehicle[" << myId << "] sending encrypted difference reply to Vehicle["
               << receivedWSM->getSenderAddress() << "]: " << replyStr << std::endl;
-    sendDown(replyMsg);*/
-    TraCIDemo11pMessage* wsm = check_and_cast<TraCIDemo11pMessage*>(frame);
-
-    std::string revWSM_str = wsm->getDemoData();
-    std::cout << "Car[" << this->myId << "] recieve the car["
-              << wsm->getSenderAddress() << "] message:" << revWSM_str << std::endl;
-
-
-
+    sendDown(replyMsg);
 }
 
 
@@ -188,7 +202,8 @@ void MyVeinsApp::handlePositionUpdate(cObject* obj)
 
     // Initialize the encryption environment.
 
-
+    num++; //
+    if (num % 2 == 0) {
     // Get the current position and encrypt the coordinates.
     Coord currentPos = mobility->getPositionAt(simTime());
     FrenetCoord frenet = getFrenetCoordinates(currentPos);
@@ -209,7 +224,9 @@ void MyVeinsApp::handlePositionUpdate(cObject* obj)
     TraCIDemo11pMessage* newWSM = new TraCIDemo11pMessage();
     populateWSM(newWSM);
     newWSM->setDemoData(posStr.c_str());
+    newWSM->setSenderAddress(myId);
     //newWSM->setHr(seed);
     sendDown(newWSM);
+    }
 
 }
