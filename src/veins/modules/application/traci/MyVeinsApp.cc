@@ -1,77 +1,215 @@
-//
-// Copyright (C) 2016 David Eckhoff <david.eckhoff@fau.de>
-//
-// Documentation for these modules is at http://veins.car2x.org/
-//
-// SPDX-License-Identifier: GPL-2.0-or-later
-//
-// This program is free software; you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation; either version 2 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program; if not, write to the Free Software
-// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
-//
-
+#include <gmpxx.h>
+#include <libhcs.h>
+#include <sstream>
+#include <cmath>
+#include <memory>
+#include <iostream>
+#include <iomanip>
+#include <random>
 #include "veins/modules/application/traci/MyVeinsApp.h"
-
+#include "veins/modules/application/traci/TraCIDemo11pMessage_m.h"
+#include "veins/modules/application/traci/FrenetUtils.h"
 using namespace veins;
 
 Define_Module(veins::MyVeinsApp);
+
+
+// Helper Function: Initialize the encryption environment.
+// It creates a random generator and generates a Paillier key pair
+// with a fixed seed to ensure consistent keys.
+void MyVeinsApp::initEncryptionEnv() {
+    hcs_random* hr_raw = hcs_init_random();
+    hr.reset(hr_raw);
+    pk.reset(pcs_init_public_key());
+    vk.reset(pcs_init_private_key());
+    pcs_generate_key_pair(pk.get(), vk.get(), hr.get(), 2048);
+
+}
+
+// Helper Function: Extract encrypted coordinates from a string.
+// The expected format is "x:<number>, y:<number>".
+// Returns a pair (x, y) as mpz_class objects.
+std::pair<mpz_class, mpz_class> MyVeinsApp::extractEncryptedCoordinates(const std::string &data)
+{
+    size_t posX = data.find("s:");
+    size_t posY = data.find(", d:");
+    std::string xStr = data.substr(posX + 2, posY - (posX + 2));
+    std::string yStr = data.substr(posY + 4);
+    return { mpz_class(xStr.c_str(), 10), mpz_class(yStr.c_str(), 10) };
+}
 
 void MyVeinsApp::initialize(int stage)
 {
     DemoBaseApplLayer::initialize(stage);
     if (stage == 0) {
-        // Initializing members and pointers of your application goes here
-        EV << "Initializing " << par("appName").stringValue() << std::endl;
+        // Initialize basic members and pointers.
+        initEncryptionEnv();
     }
     else if (stage == 1) {
-        // Initializing members that require initialized other modules goes here
+        // Initialization dependent on other modules.
     }
 }
+
 
 void MyVeinsApp::finish()
 {
     DemoBaseApplLayer::finish();
-    // statistics recording goes here
+    // Additional statistics recording can go here.
 }
+
 
 void MyVeinsApp::onBSM(DemoSafetyMessage* bsm)
 {
-    // Your application has received a beacon message from another car or RSU
-    // code for handling the message goes here
+    // Handle beacon messages from other vehicles or RSUs.
 }
 
-void MyVeinsApp::onWSM(BaseFrame1609_4* wsm)
-{
-    // Your application has received a data message from another car or RSU
-    // code for handling the message goes here, see TraciDemo11p.cc for examples
+// Handle WSM (Wave Short Message) reception.
+// Processes both encrypted coordinate messages and replies.
+void MyVeinsApp::onWSM(BaseFrame1609_4* frame) {
+    // Initialize the encryption environment.
+
+    /*std::cout <<  "22222" << std::endl;
+    // Cast the incoming message to our message type.
+    TraCIDemo11pMessage* receivedWSM = check_and_cast<TraCIDemo11pMessage*>(wsm);
+    std::string receivedData = receivedWSM->getDemoData();
+
+    // If serial equals 1, this is a reply message containing encrypted differences.
+    if (receivedWSM->getSerial() == 1) {
+        auto diffPair = extractEncryptedCoordinates(receivedData);
+        mpz_class diff1 = diffPair.first;
+        mpz_class diff2 = diffPair.second;
+
+        // Decrypt the differences.
+        pcs_decrypt(vk.get(), diff1.get_mpz_t(), diff1.get_mpz_t());
+        pcs_decrypt(vk.get(), diff2.get_mpz_t(), diff2.get_mpz_t());
+
+        // Adjust if using a Z_n representation with negatives.
+        mpz_class n_val(pk.get()->n);
+        mpz_class half_n = n_val / 2;
+        if(diff1 > half_n)
+            diff1 -= n_val;
+        if(diff2 > half_n)
+            diff2 -= n_val;
+
+        // Calculate the Euclidean distance.
+        long double d1 = diff1.get_d();
+        long double d2 = diff2.get_d();
+        long double distance = std::sqrt(d1 * d1 + d2 * d2);
+
+        std::cout << "Receiver Vehicle[" << myId << "] received decrypted differences from Vehicle["
+                  << receivedWSM->getSenderAddress() << "]: ("
+                  << diff1 << ", " << diff2 << "), Euclidean distance = " << distance << std::endl;
+        return;
+    }
+
+    // Otherwise, the message contains encrypted coordinates.
+    size_t posS    = receivedData.find("s:");
+    size_t posD    = receivedData.find(",d:");
+    size_t posN    = receivedData.find(",n:");
+    size_t posG    = receivedData.find(",g:");
+
+
+
+    mpz_class enc_remoteX(receivedData.substr(posS+2, posD-posS-2).c_str());
+    mpz_class enc_remoteY(receivedData.substr(posD+3, posN-posD-3).c_str());
+    mpz_class remote_n(receivedData.substr(posN+3, posG-posN-3).c_str());
+    mpz_class remote_g(receivedData.substr(posG + 3).c_str());
+
+
+
+    std::unique_ptr<pcs_public_key, void(*)(pcs_public_key*)> remote_pk(pcs_init_public_key(), [](pcs_public_key* k){ pcs_free_public_key(k); });
+    mpz_set(remote_pk->n, remote_n.get_mpz_t());
+    mpz_set(remote_pk->g, remote_g.get_mpz_t());
+    mpz_pow_ui(remote_pk->n2, remote_pk->n, 2);
+
+    std::cout << "Receiver Vehicle[" << myId << "] received encrypted coordinates from Vehicle["
+              << receivedWSM->getSenderAddress() << "]: s = " << enc_remoteX
+              << ", d = " << enc_remoteY << std::endl;
+
+    // Encrypt the local vehicle's current coordinates.
+    Coord currentPos = mobility->getPositionAt(simTime());
+    FrenetCoord frenet = getFrenetCoordinates(currentPos);
+    mpz_class localX(frenet.s), localY(frenet.d);
+    mpz_class enc_localX = localX, enc_localY = localY;
+    pcs_encrypt(remote_pk.get(), hr.get(), enc_localX.get_mpz_t(), enc_localX.get_mpz_t());
+    pcs_encrypt(remote_pk.get(), hr.get(), enc_localY.get_mpz_t(), enc_localY.get_mpz_t());
+
+    // Compute the homomorphic difference:
+    // Enc(remote - local) = Enc(remote) * (Enc(local))^{-1} mod n^2.
+    mpz_class inv_enc_localX, inv_enc_localY;
+    mpz_invert(inv_enc_localX.get_mpz_t(), enc_localX.get_mpz_t(), remote_pk.get()->n2);
+    if (mpz_invert(inv_enc_localY.get_mpz_t(), enc_localY.get_mpz_t(), remote_pk.get()->n2) == 0) {
+        EV_ERROR << "Vehicle[" << myId << "]: Inversion for enc_localY failed!\n";
+        return;
+    }
+    mpz_class enc_diffX, enc_diffY;
+    mpz_mul(enc_diffX.get_mpz_t(), enc_remoteX.get_mpz_t(), inv_enc_localX.get_mpz_t());
+    mpz_mod(enc_diffX.get_mpz_t(), enc_diffX.get_mpz_t(), remote_pk.get()->n2);
+    mpz_mul(enc_diffY.get_mpz_t(), enc_remoteY.get_mpz_t(), inv_enc_localY.get_mpz_t());
+    mpz_mod(enc_diffY.get_mpz_t(), enc_diffY.get_mpz_t(), remote_pk.get()->n2);
+
+    // Build a reply message containing the encrypted differences.
+    std::ostringstream oss;
+    oss << "s:" << enc_diffX << ", d:" << enc_diffY;
+    std::string replyStr = oss.str();
+    TraCIDemo11pMessage* replyMsg = new TraCIDemo11pMessage();
+    populateWSM(replyMsg);
+    replyMsg->setDemoData(replyStr.c_str());
+    replyMsg->setSerial(1);  // Mark the message as a reply.
+    std::cout << "Receiver Vehicle[" << myId << "] sending encrypted difference reply to Vehicle["
+              << receivedWSM->getSenderAddress() << "]: " << replyStr << std::endl;
+    sendDown(replyMsg);*/
+    TraCIDemo11pMessage* wsm = check_and_cast<TraCIDemo11pMessage*>(frame);
+
+    std::string revWSM_str = wsm->getDemoData();
+    std::cout << "Car[" << this->myId << "] recieve the car["
+              << wsm->getSenderAddress() << "] message:" << revWSM_str << std::endl;
+
+
+
 }
+
 
 void MyVeinsApp::onWSA(DemoServiceAdvertisment* wsa)
 {
-    // Your application has received a service advertisement from another car or RSU
-    // code for handling the message goes here, see TraciDemo11p.cc for examples
+    // Process service advertisement messages here.
+    // Refer to TraciDemo11p.cc for examples.
 }
-
 void MyVeinsApp::handleSelfMsg(cMessage* msg)
 {
     DemoBaseApplLayer::handleSelfMsg(msg);
-    // this method is for self messages (mostly timers)
-    // it is important to call the DemoBaseApplLayer function for BSM and WSM transmission
+    // Additional self-message handling can be added here.
 }
+
 
 void MyVeinsApp::handlePositionUpdate(cObject* obj)
 {
     DemoBaseApplLayer::handlePositionUpdate(obj);
-    // the vehicle has moved. Code that reacts to new positions goes here.
-    // member variables such as currentPosition and currentSpeed are updated in the parent class
+
+    // Initialize the encryption environment.
+
+
+    // Get the current position and encrypt the coordinates.
+    Coord currentPos = mobility->getPositionAt(simTime());
+    FrenetCoord frenet = getFrenetCoordinates(currentPos);
+    std::cout <<  myId << std::endl;
+    std::cout << "s = " << std::fixed << std::setprecision(1) << frenet.s << std::endl;
+    std::cout << "d = " << std::fixed << std::setprecision(1) << frenet.d << std::endl;
+    mpz_class a1(frenet.s), a2(frenet.d);
+    mpz_class enc_a1 = a1, enc_a2 = a2;
+    pcs_encrypt(pk.get(), hr.get(), enc_a1.get_mpz_t(), enc_a1.get_mpz_t());
+    pcs_encrypt(pk.get(), hr.get(), enc_a2.get_mpz_t(), enc_a2.get_mpz_t());
+    // Format the encrypted coordinates into a string.
+    mpz_class pk_n(pk.get()->n), pk_g(pk.get()->g);
+    std::ostringstream oss;
+    oss << "s:" << enc_a1 << ",d:" << enc_a2
+        << ",n:" << pk_n.get_str()
+        << ",g:" << pk_g.get_str();
+    std::string posStr = oss.str();
+    TraCIDemo11pMessage* newWSM = new TraCIDemo11pMessage();
+    populateWSM(newWSM);
+    newWSM->setDemoData(posStr.c_str());
+    //newWSM->setHr(seed);
+    sendDown(newWSM);
+
 }
