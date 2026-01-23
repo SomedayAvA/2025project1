@@ -22,7 +22,7 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #
 
-
+CXXFLAGS += -std=c++17
 #
 # on windows, special care is needed for linking
 # adapted from INET Framework (inet-4.2.2) makefrag

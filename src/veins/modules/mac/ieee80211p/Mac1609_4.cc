@@ -564,7 +564,6 @@ void Mac1609_4::handleBroadcast(Mac80211Pkt* macPkt, DeciderResult80211* res)
 void Mac1609_4::handleLowerMsg(cMessage* msg)
 {
     Mac80211Pkt* macPkt = check_and_cast<Mac80211Pkt*>(msg);
-
     // pass information about received frame to the upper layers
     DeciderResult80211* macRes = check_and_cast<DeciderResult80211*>(PhyToMacControlInfo::getDeciderResult(msg));
     DeciderResult80211* res = new DeciderResult80211(*macRes);

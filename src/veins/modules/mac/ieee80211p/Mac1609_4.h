@@ -78,7 +78,7 @@ public:
     static const simsignal_t sigSentAck;
     // tell to anybody which is interested when a failed unicast transmission occurred
     static const simsignal_t sigRetriesExceeded;
-
+    int collisionCounter = 0;
     // Access categories in increasing order of priority (see IEEE Std 802.11-2012, Table 9-1)
     enum t_access_category {
         AC_BK = 0,
